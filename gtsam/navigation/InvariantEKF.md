@@ -9,33 +9,25 @@ Three classes of Extended Kalman Filters have been added to GTSAM under `navigat
 - **[LieGroupEKF](https://github.com/borglab/gtsam/blob/develop/gtsam/navigation/LieGroupEKF.h)**: Implements an EKF for states that operate on a Lie group with state dependent dynamics.
 - **[InvariantEKF](https://github.com/borglab/gtsam/blob/develop/gtsam/navigation/InvariantEKF.h)**: Implements an EKF for states that operate on a Lie group with group composition (state independent) dynamics.
 
+## Class Diagram
 
-
-## AHRSFactor and Preintegration
-
-This section describes the classes primarily involved in Attitude and Heading Reference Systems (AHRS), which rely on gyroscope measurements for orientation preintegration.
 
 ```mermaid
 classDiagram
-  direction LR
+  direction TD
 
   class ManifoldEKF~M~ {
     <<template M>>
     #M X_
     #Covariance P_
     #int n_
-    +ManifoldEKF(X0: M, P0: Covariance)
-    +state() : M
-    +covariance() : Covariance
-    +dimension() : int
-    +predict(X_next: M, F: Jacobian, Q: Covariance) : void
-    +update(prediction: Measurement, H: Matrix, z: Measurement, R: Matrix) : void
-    +update(h_func: MeasurementFunction, z: Measurement, R: Matrix) : void
+    +predict(X_next: M, F: Jacobian, Q: Covariance)
+    +update(prediction: Measurement, H: Matrix, z: Measurement, R: Matrix) 
+    +update(h_func: MeasurementFunction, z: Measurement, R: Matrix) 
   }
 
   class LieGroupEKF~G~ {
     <<template G>>
-    +LieGroupEKF(X0: G, P0: Covariance)
     +predictMean(f: Dynamics, dt: double, A: Jacobian) : G
     +predict(f: Dynamics, dt: double, Q: Covariance) : void
     +predictMean(f: Dynamics, u: Control, dt: double, A: Jacobian) : G
@@ -44,7 +36,6 @@ classDiagram
 
   class InvariantEKF~G~ {
     <<template G>>
-    +InvariantEKF(X0: G, P0: Covariance)
     +predict(U: G, Q: Covariance) : void
     +predict(u: TangentVector, dt: double, Q: Covariance) : void
   }
@@ -52,140 +43,242 @@ classDiagram
   ManifoldEKF~M~ <|-- LieGroupEKF~G~
   LieGroupEKF~G~ <|-- InvariantEKF~G~
 
-  note for ManifoldEKF~M~ "M: GTSAM Manifold\nCovariance: Eigen::Matrix<double, Dim, Dim>\nJacobian: Eigen::Matrix<double, Dim, Dim>\nProtected members: X_ (state), P_ (covariance), n_ (dimension)"
-  note for LieGroupEKF~G~ "G: GTSAM Lie Group\nInherits X_, P_, n_ from ManifoldEKF\nInherits update() methods from ManifoldEKF"
-  note for InvariantEKF~G~ "G: GTSAM Lie Group\nInherits X_, P_, n_ from ManifoldEKF\nRestricts predict() to invariant forms\nInherits update() methods from ManifoldEKF"
 ```
 
-The key components are:
 
-1.  **Parameters (`PreintegratedRotationParams`)**:
-    *   Stores parameters specific to gyroscope integration, including gyro noise covariance, optional Coriolis terms, and the sensor's pose relative to the body frame.
-
-2.  **Rotation Preintegration ([PreintegratedRotation](doc/PreintegratedRotation.ipynb))**:
-    *   Handles the core logic for integrating gyroscope measurements over time to estimate the change in orientation (`deltaRij`).
-    *   Calculates the Jacobian of this integrated rotation with respect to gyroscope bias (`delRdelBiasOmega`).
-
-3.  **AHRS Preintegrated Measurements (`PreintegratedAhrsMeasurements`)**:
-    *   Inherits from `PreintegratedRotation` and adds the calculation and storage of the covariance matrix (`preintMeasCov_`) associated with the preintegrated rotation.
-    *   This class specifically accumulates the information needed by the `AHRSFactor`.
-
-4.  **AHRS Factor ([AHRSFactor](doc/AHRSFactor.ipynb))**:
-    *   A factor that constrains two `Rot3` orientation variables and a `Vector3` bias variable using the information accumulated in a `PreintegratedAhrsMeasurements` object.
-    *   It effectively measures the consistency between the orientation change predicted by the integrated gyro measurements and the orientation change implied by the factor's connected state variables.
-
-## IMU Factor and Preintegration
-
-This section describes the classes involved in preintegrating full IMU measurements (accelerometer and gyroscope) for use in factors like `ImuFactor` and `CombinedImuFactor`.
-
-```mermaid
-classDiagram
-    direction TD
-
-    class PreintegrationBase {
-        <<Abstract>>
-        +imuBias::ConstantBias biasHat_
-        +double deltaTij_
-        +resetIntegration()*
-        +integrateMeasurement()*
-        +biasCorrectedDelta()*
-        +predict()
-        +computeError()
-    }
-
-    class ManifoldPreintegration {
-        +NavState deltaXij_
-        +update()
-    }
-    ManifoldPreintegration --|> PreintegrationBase : implements
-
-    class TangentPreintegration {
-        +Vector9 preintegrated_
-        +update()
-    }
-    TangentPreintegration --|> PreintegrationBase : implements
-
-    class PreintegratedImuMeasurements {
-        +Matrix9 preintMeasCov_
-    }
-    PreintegratedImuMeasurements --|> ManifoldPreintegration : inherits
-    PreintegratedImuMeasurements --|> TangentPreintegration : inherits
-
-    class PreintegratedCombinedMeasurements {
-       +Matrix preintMeasCov_ (15x15)
-    }
-    PreintegratedCombinedMeasurements --|> ManifoldPreintegration : inherits
-    PreintegratedCombinedMeasurements --|> TangentPreintegration : inherits
-
-    class ImuFactor {
-        Pose3, Vector3, Pose3, Vector3, ConstantBias
-        +evaluateError(...) Vector9
-    }
-    ImuFactor ..> PreintegratedImuMeasurements : uses
-    class ImuFactor2 {
-        NavState, NavState, ConstantBias
-        +evaluateError(...) Vector9
-    }
-    ImuFactor2 ..> PreintegratedImuMeasurements : uses
-
-
-    class CombinedImuFactor {
-        Pose3, Vector3, Pose3, Vector3, ConstantBias
-         +evaluateError(...) Vector (15)
-    }
-    CombinedImuFactor ..> PreintegratedCombinedMeasurements : uses
+## Extended Kalman Filters
+Extended Kalman Filters operate with a state  $x \in \mathbb{R}^n$ in Euclidean space. The state transition model and observation model are given by 
+```math
+x_k = f(x_{k-1}, u_{k-1}) + w_{k-1}
+```
+```math
+z_k = h(x_k) + v_k
+```
+The state of this system can be predicted using the deterministic portion of the state transition model and observation model. The covariance is predicted using the Jacobians of the state transition and observation model.
+### Prediction Stage
+```math
+\hat{x}_{k|k-1} = f(\hat{x}_{k-1|k-1}, u_{k})
+```
+```math
+F_k = \frac{\partial f}{\partial x}|_{k-1|k-1}
+```
+```math
+P_{k|k-1} = F_kP_{k-1|k-1}F_k^T + Q_{k-1}
+```
+### Update Stage
+```math
+y_k = z_k - h(\hat{x}_{k|k-1})
+```
+```math
+H_k =\frac{\partial h}{\partial x}|_{k|k-1}
+```
+```math
+S_k = H_kP_{k|k-1}H_k^T + R_k
+```
+```math
+K_k = P_{k|k-1}H_k^TS_k^{-1}
+```
+```math
+\hat{x}_{k|k} = \hat{x}_{k|k-1} + K_ky_k
+```
+```math
+P_{k|k} = (I - K_kH_k)P_{k|k-1}
 ```
 
-```mermaid
-classDiagram
-    direction LR
+On a manifold, these equations do not maintain the geometric structure when a state operates on a differentiable manifold. 
 
-    class PreintegratedRotationParams {
-        +Matrix3 gyroscopeCovariance
-        +Vector3 omegaCoriolis
-        +Pose3 body_P_sensor
-    }
-    class PreintegrationParams {
-     +Matrix3 accelerometerCovariance
-     +Vector3 n_gravity
-    }
-    PreintegrationParams --|> PreintegratedRotationParams : inherits
+## ManifoldEKF
+The **[ManifoldEKF](https://github.com/borglab/gtsam/blob/develop/gtsam/navigation/ManifoldEKF.h)** class adapts the Extended Kalman Filter equations for states that reside on a differentiable manifold. This templated class contains the abstract predict and update steps for operating on a manifold. In this EKF, the state lies on a Manifold whereas the covariance is represented in the tangent space. 
 
-    class PreintegrationCombinedParams {
-     +Matrix3 biasAccCovariance
-     +Matrix3 biasOmegaCovariance
-    }
-    PreintegrationCombinedParams --|> PreintegrationParams : inherits
+### Predict Stage
+In the predict stage, the EKF equations may be propagated in two ways. If the state transition function $f$ yields a new Manifold state, then
+```math
+\hat{X}_{k|k-1} = f(\hat{X}_{k-1|k-1}, u_{k})
+```
+Otherwise, if the motion model is an increment in the tangent space, we have
+```math
+\hat{X}_{k|k-1} = \text{retract}(\hat{X}_{k-1|k-1}, \xi_k)
 ```
 
-The key components are:
+ManifoldEKF does not define which method is used. Rather, we simply leave it abstract such that $X_{k|k-1} = X_{\text{next}}$ 
+where $X_{\text{next}}$ is defined by the user in their own prediction function.
 
-1.  **Parameters (`...Params`)**:
-    *   `PreintegratedRotationParams`: Base parameter class (gyro noise, Coriolis, sensor pose).
-    *   `PreintegrationParams`: Adds accelerometer noise, gravity vector, integration noise.
-    *   `PreintegrationCombinedParams`: Adds parameters for bias random walk covariance.
+### Update Stage
+In the tangent space, the residual is given by
+```math
+y_k = \text{local}(h(\hat{X}_{k|k-1}), z_k)
+```
 
-2.  **Preintegration Interface (`PreintegrationBase`)**:
-    *   An abstract base class defining the common interface for different IMU preintegration methods. It manages the bias estimate used during integration (`biasHat_`) and the time interval (`deltaTij_`).
-    *   Defines pure virtual methods for integration, bias correction, and state access.
+This yields a new update increment
+```math
+\delta \xi_k = K_ky_k
+```
+and update equation
+```math
+\hat{X}_{k|k} = \text{retract}(\hat{X}_{k|k-1}, \delta \xi_k)
+```
 
-3.  **Preintegration Implementations**:
-    *   `ManifoldPreintegration`: Concrete implementation of `PreintegrationBase`. Integrates directly on the `NavState` manifold, storing the result as a `NavState`. Corresponds to Forster et al. RSS 2015.
-    *   `TangentPreintegration`: Concrete implementation of `PreintegrationBase`. Integrates increments in the 9D tangent space of `NavState`, storing the result as a `Vector9`.
+ManifoldEKF defines an abstract measurement model function that is inherited by LieGroup and InvariantEKF. A user defines their specific measurement function based on the template.
+## LieGroupEKF
+The **[LieGroupEKF](https://github.com/borglab/gtsam/blob/develop/gtsam/navigation/LieGroupEKF.h)** inherits the predict and update stages from **[ManifoldEKF](https://github.com/borglab/gtsam/blob/develop/gtsam/navigation/ManifoldEKF.h)**. This templated class is limited to states that operate on a Lie group. 
 
-4.  **Preintegrated Measurements Containers**:
-    *   `PreintegratedImuMeasurements`: Stores the result of standard IMU preintegration along with its 9x9 covariance (`preintMeasCov_`).
-    *   `PreintegratedCombinedMeasurements`: Similar, but designed for the `CombinedImuFactor`. Stores the larger 15x15 covariance matrix (`preintMeasCov_`) that includes correlations with the bias terms.
+This class provides predict methods for state dependent dynamics. There are four functions that are implemented in this class. The predictMean() function computes the next state $X_{\text{next}}$ and the Jacobian $F$ that depends on a state dependent dynamics function. Furthermore, there is an overload predictMean() that depends on a state dependent dynamics function and a control input $u$. These values are passed into the predict() function to utilize the EKF equations described in ManifoldEKF.
 
-5.  **IMU Factors (`...Factor`)**:
-    * [ImuFactor](doc/ImuFactor.ipynb): A 5-way factor connecting previous pose/velocity, current pose/velocity, and a single (constant during the interval) bias estimate. Does *not* model bias evolution between factors.
-    * [ImuFactor2](doc/ImuFactor.ipynb): A 3-way factor connecting previous `NavState`, current `NavState`, and a single bias estimate. Functionally similar to `ImuFactor` but uses the combined `NavState` type.
-    * [CombinedImuFactor](doc/CombinedImuFactor.ipynb): A 6-way factor connecting previous pose/velocity, current pose/velocity, previous bias, and current bias. *Includes* a model for bias random walk evolution between the two bias states.
+## InvariantEKF
+The **[InvariantEKF](https://github.com/borglab/gtsam/blob/develop/gtsam/navigation/InvariantEKF.h)** inherits the predict and update stages from **[ManifoldEKF](https://github.com/borglab/gtsam/blob/develop/gtsam/navigation/ManifoldEKF.h)**. This templated class is limited to states that operate on a Lie group.
 
-### Important notes
-- Which implementation is used for `PreintegrationType` depends on the compile flag `GTSAM_TANGENT_PREINTEGRATION`, which is true by default.
-    - If false, `ManifoldPreintegration` is used. Please use this setting to get the exact implementation from {cite:t}`https://doi.org/10.1109/TRO.2016.2597321`.
-    - If true, `TangentPreintegration` is used. This does the integration on the tangent space of the NavState manifold.
-- Using the combined IMU factor is not recommended. Typically biases evolve slowly, and hence a separate, lower frequency Markov chain on the bias is more appropriate.
-- For short-duration experiments it is even recommended to use a single constant bias. Bias estimation is notoriously hard to tune/debug, and also acts as a "sink" for any modeling errors. Hence, starting with a constant bias is a good idea to get the rest of the pipeline working.
+The InvariantEKF is a special case of the LieGroupEKF that has state independent dynamics. Specifically, this is a Left Invariant EKF. The prediction methods use group composition. Two prediction methods are introduced in this class.
+Let $u$ be a tangent control vector. A Lie group increment, then, is given by $U = \exp(u \cdot dt)$, and so
+```math
+\hat{X}_{k|k-1} = \hat{X}_{k-1|k-1}U_k
+```
+The Jacobian $F$ is given by 
+```math
+F_k = Ad_{U_{k}}^{-1}
+```
+The prediction method is inherited from LieGroupEKF. Two prediction methods are implemented; one with a Lie group increment $U_k$ and one with a tangent control vector $u_k$ and $dt$. 
+
+
+##  InvariantEKF Example on SE(2) using Lie Group increments
+This demonstrates the use of an Invariant EKF with a simple odometry increment. The example is found under `examples` as **[IEKF_SE2Example](https://github.com/borglab/gtsam/blob/develop/gtsam/examples/IEKF_SE2Example.cpp)**
+
+Let the Lie group be $\mathcal{SE}_2$, or Pose2 in GTSAM. We will use a Lie group increment as our odometry vector, and a 2D GPS measurement. 
+
+#### Defining a GPS Measurement Function
+The predicted GPS measurement $h_k$ is given by the translation of the predicted state estimate. Then, the GPS measurement function is given by
+
+```
+Vector2 h_gps(const Pose2& X, OptionalJacobian<2, 3> H = {}) {
+  return X.translation(H);
+}
+```
+
+#### Creating and Initializing the EKF
+The initial state and covariance need to be defined to create the filter.
+```
+  Pose2 X0(0.0, 0.0, 0.0);
+  Matrix3 P0 = Matrix3::Identity() * 0.1;
+```
+
+The filter can then be created with
+```
+  InvariantEKF<Pose2> ekf(X0, P0);
+```
+
+For this example, we assume constant process and observation covariances. We define them as
+```
+  Matrix3 Q = (Vector3(0.05, 0.05, 0.001)).asDiagonal();
+  Matrix2 R = I_2x2 * 0.01;
+```
+
+#### Defining odometry and measurements
+We define two simple odometry steps with a Lie group increment $U$ 
+```
+Pose2 U1(1.0, 1.0, 0.5), U2(1.0, 1.0, 0.0);
+```
+and two GPS measurements
+```
+  Vector2 z1, z2;
+  z1 << 1.0, 0.0;
+  z2 << 1.0, 1.0;
+```
+
+#### Running the EKF
+The EKF is propagated using odometry with 
+```
+ekf.predict(U1, Q);
+```
+
+and updated using measurements via
+```
+ekf.update(h_gps, z1, R);
+```
+
+## InvariantEKF on NavState using a Dynamics Function
+The **[IEKF_NavstateExample](https://github.com/borglab/gtsam/blob/develop/gtsam/examples/IEKF_NavstateExample.cpp)** operates on the Lie group $\mathcal{SE}_2(3)$. This example propagates the EKF using IMU measurements and a dynamics function that convert the measurements into the tangent space. The measurement is a 3D GPS measurement.
+
+#### Defining the Dynamics
+An IMU utilizes accelerometers and gyroscopes to estimate the pose of the robot. This is commonly used in inertial navigation aboard aircraft. An accelerometer and gyroscope measures the proper acceleration and the angular velocity experienced by the body. Then, $u = [a_x, a_y, a_z, w_x, w_y, w_z]^T$. In the tangent space of $\mathcal{SE}_2(3)$, we have $\xi = [w_x, w_y, w_z, 0, 0, 0, a_x, a_y, a_z]^T$. The dynamics function, then, is given by 
+
+```
+Vector9 dynamics(const Vector6& imu) {
+  auto a = imu.head<3>();
+  auto w = imu.tail<3>();
+  Vector9 xi;
+  xi << w, Vector3::Zero(), a;
+  return xi;
+}
+```
+
+#### 3D GPS Measurement Processor
+The predicted GPS measurement is simply the 3D position estimate of the current state estimate. Then, 
+```
+Vector3 h_gps(const NavState& X, OptionalJacobian<3, 9> H = {}) {
+  return X.position(H);
+}
+```
+
+#### Creating and Initializing the EKF
+We initialize the state and covariance, then
+```
+  NavState X0;  // R=I, v=0, t=0
+  Matrix9 P0 = Matrix9::Identity() * 0.1;
+```
+and the EKF is created using
+```
+  InvariantEKF<NavState> ekf(X0, P0);
+```
+
+For this example, we assume constant process and observation covariances. Then, 
+```
+  Matrix9 Q = Matrix9::Identity() * 0.01;
+  Matrix3 R = Matrix3::Identity() * 0.5;
+```
+
+#### Defining IMU and GPS measurements
+We define two IMU measurements and two GPS measurements. Then, the IMU is given by
+```
+  Vector6 imu1;
+  imu1 << 0.1, 0, 0, 0, 0.2, 0;
+  Vector6 imu2;
+  imu2 << 0, 0.3, 0, 0.4, 0, 0;
+```
+and the GPS measurements are given by
+```
+  Vector3 z1;
+  z1 << 0.3, 0, 0;
+  Vector3 z2;
+  z2 << 0.6, 0, 0;
+```
+
+Given that we are using control vector inputs $u$, we also need a time interval $dt$. Therefore, we describe
+
+```
+  double dt = 1.0;
+```
+
+#### Running the EKF
+The prediction stage is called using
+```
+ ekf.predict(dynamics(imu1), dt, Q);
+```
+
+and the update stage is called using
+
+```
+  ekf.update(h_gps, z1, R);
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
 
